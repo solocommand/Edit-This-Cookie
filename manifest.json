@@ -20,7 +20,7 @@
     },
     
     "background": {
-    	"scripts" : ["/alternet/alter-network-background.js", "/lib/jquery-1.8.1.min.js", "/lib/object-watch.js", "/js/cookie_helpers.js", "/js/utils.js", "/js/data.js", "/js/background.js"]
+    	"scripts" : ["/alternet/alter-network-background.js", "/lib/jquery-2.0.3.min.js", "/lib/object-watch.js", "/js/cookie_helpers.js", "/js/utils.js", "/js/data.js", "/js/background.js"]
     },
 
     "options_page": "options_main_page.html",
@@ -39,7 +39,7 @@
     
     "content_scripts": [{
     	"matches": ["http://*/*","https://*/*"],
-		"js": ["/alternet/jquery-1.7.2.min.js","/alternet/injectorChecker.js"],
+		"js": ["/alternet/jquery-2.0.3.min.js","/alternet/injectorChecker.js"],
 		"run_at":"document_start"
 	}],
 	
