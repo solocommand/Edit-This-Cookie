@@ -1,5 +1,6 @@
 var url;
 var currentTabID;
+var isTabIncognito = false;
 var cookieList = new Array();
 var newCookie = false;
 var pasteCookie = false;
@@ -8,6 +9,8 @@ var createAccordionCallback, createAccordionCallbackArguments;
 var scrollsave;
 
 jQuery(document).ready(function(){
+	//$( "#tabs" ).tabs();
+	
 	++data.nPopupClicked;
 	start();
 	//$("input:checkbox").uniform();
@@ -23,6 +26,8 @@ updateCallback = function() {
 */
 
 function start() {
+	setLoaderVisible(true);
+
 	resizeCommandsFontSize();
 	
 	var arguments = getUrlVars();
@@ -33,17 +38,18 @@ function start() {
 			var filter = new Filter();
 			filter.setUrl(url);
 			//filter.setDomain(getDomain(url));
-			createList(filter.getFilter(), preferences.sortCookiesAlpha);
+			createList(filter.getFilter());
 			document.title = document.title + "-" + url;
 		});
 	} else {
 		isSeparateWindow = true;
 		url = decodeURI(arguments.url);
 		currentTabID = parseInt(decodeURI(arguments.id));
+		isTabIncognito = decodeURI(arguments.incognito) == "true";
 		var filter = new Filter();
 		filter.setUrl(url);
 		//filter.setDomain(getDomain(url));
-		createList(filter.getFilter(), preferences.sortCookiesAlpha);
+		createList(filter.getFilter());
 		document.title = document.title + "-" + url;
 	}
 }
@@ -149,8 +155,8 @@ function submitNew() {
 	location.reload(true);
 }
 
-function createList(filters, sortCookiesAlpha) {
-	var filteredCookies = [];	
+function createList(filters) {
+	var filteredCookies = [];
 	
 	if(filters == null)
 		filters = {};
@@ -162,8 +168,9 @@ function createList(filters, sortCookiesAlpha) {
 		filterURL.domain = filters.domain;
 		
 	chrome.cookies.getAll(filterURL, function(cks) {
+		var currentC;
 		for(var i=0; i<cks.length; i++) {
-			var currentC = cks[i];
+			currentC = cks[i];
 			
 			if(filters.name != undefined && currentC.name.toLowerCase().indexOf(filters.name.toLowerCase()) == -1)
 				continue;
@@ -189,30 +196,37 @@ function createList(filters, sortCookiesAlpha) {
 			filteredCookies.push(currentC);
 		}
 		cookieList = filteredCookies;
-
-        // Allow sorting if configuration option is enabled.
-        if (sortCookiesAlpha)
-        {
-            cookieList = cookieList.sort(function(a, b) {
-                if(a.name < b.name) return -1;
-                if(a.name > b.name) return 1;
-                return 0;
-            });
-        }
 		
-		//setTimeout(function(){								//Testing if it fixes a weird bug with jQuery's accordion //Apparently does
-			createAccordionList(cookieList, function(){
-				if(!isSeparateWindow) {
-					$('#submitDiv').css({
-						'bottom': 0
-					});
-				} else {
-					$('#submitDiv').addClass("submitDivSepWindow");
-				}
-				setEvents();
-				//$("#loading").hide();
-			});
-		//}, 0);
+		if(cookieList.length == 0) {
+			$("#noCookies").show();
+			setEvents();
+			setLoaderVisible(false);
+			return;
+		}
+		
+		$("#noCookies").hide();
+		
+		cookieList.sort(function (a, b) {
+			if(preferences.sortCookiesType == "domain_alpha") {
+				var compDomain = a.domain.toLowerCase().localeCompare(b.domain.toLowerCase());
+				if(compDomain)
+					return compDomain;
+			} 
+			return a.name.toLowerCase().localeCompare(b.name.toLowerCase())
+		});
+		
+		createAccordionList(cookieList, function(){
+			if(!isSeparateWindow) {
+				$('#submitDiv').css({
+					'bottom': 0
+				});
+			} else {
+				$('#submitDiv').addClass("submitDivSepWindow");
+			}
+			setEvents();
+			$("input:checkbox").uniform();
+			setLoaderVisible(false);
+		});
 	});
 }
 
@@ -231,9 +245,25 @@ function createAccordionList(cks, callback, callbackArguments) {
 	for(var i=0; i<cks.length; i++) {
 		currentC = cks[i];
 		
-		
-	 	var titleText = (currentC.name) + ((preferences.showDomain) ? " | " + (currentC.domain) : "");
-	 	var titleElement = $("<h3/>").addClass(currentC.name).append($("<a/>").text(titleText).attr("href", "#"));
+	 	var domainText = "";
+	 	if(preferences.showDomain) {
+	 		domainText = currentC.domain;
+	 		if(preferences.showDomainBeforeName) {
+	 			domainText = domainText + " | ";
+	 		} else {
+	 			domainText = " | " + domainText;
+	 		}
+	 	}
+	 	
+	 	var titleText;
+	 	if(preferences.showDomainBeforeName) {
+	 		titleText = $("<p/>").text(domainText).append($("<b/>").text(currentC.name));
+	 	} else {
+	 		titleText = $("<p/>").append($("<b/>").text(currentC.name)).append($("<span/>").text(domainText));
+	 	}
+	 	
+	 	var titleElement = $("<h3/>").addClass(currentC.name).append($("<a/>").html(titleText.html()).attr("href", "#"));
+	 	
 		var cookie = $(".cookie_details_template").clone().removeClass("cookie_details_template");
 		cookie.addClass(currentC.name);
 		
@@ -388,27 +418,32 @@ function setEvents() {
 		startAlertDialog(_getMessage("Alert_deleteAll"), okFunction, function(){});
 	});
 	
-	$("#flagAllButton").unbind().click(function() {
-		if(cookieList.length == 0)
-			return false;
-		var okFunction = function() {
-			nCookiesFlaggedThisTime = cookieList.length;
-			for(var i=0; i<cookieList.length; i++) {
-				var currentCookie = cookieList[i];
-				if(currentCookie.isProtected)
-					continue;
-				var newRule = {};
-				newRule.domain = currentCookie.domain;
-				newRule.name = currentCookie.name;
-				addBlockRule(newRule);
-				deleteCookie(url, currentCookie.name, currentCookie.storeId);
+	if(preferences.showFlagAndDeleteAll) {
+		$("#flagAllButton").show();
+		$("#flagAllButton").unbind().click(function() {
+			if(cookieList.length == 0)
+				return false;
+			var okFunction = function() {
+				nCookiesFlaggedThisTime = cookieList.length;
+				for(var i=0; i<cookieList.length; i++) {
+					var currentCookie = cookieList[i];
+					if(currentCookie.isProtected)
+						continue;
+					var newRule = {};
+					newRule.domain = currentCookie.domain;
+					newRule.name = currentCookie.name;
+					addBlockRule(newRule);
+					deleteCookie(url, currentCookie.name, currentCookie.storeId);
+				}
+				data.nCookiesFlagged += nCookiesFlaggedThisTime;
+				location.reload(true);
+				return;
 			}
-			data.nCookiesFlagged += nCookiesFlaggedThisTime;
-			location.reload(true);
-			return;
-		}
-		startAlertDialog(_getMessage("flagAll"), okFunction, function(){});
-	});
+			startAlertDialog(_getMessage("flagAll"), okFunction, function(){});
+		});
+	} else {
+		$("#flagAllButton").hide();
+	}
 	
 	$("#copyButton").attr("title",preferences.copyCookiesType);
 
@@ -420,6 +455,7 @@ function setEvents() {
 		$("#addCookieButton").fadeOut('fast', function(){
 			$("#backToList").fadeIn('fast');
 		});
+		$("#noCookies").slideUp();
 		$("#cookieFilter").slideUp();
 		$("#submitFiltersButton").slideUp();
 		$("#cookiesList").slideUp('fast');
@@ -435,6 +471,7 @@ function setEvents() {
 		$("#backToList").fadeOut('fast', function(){
 			$("#addCookieButton").fadeIn('fast');
 		});
+		$("#noCookies").slideDown();
 		$("#cookieFilter").slideUp();
 		$("#submitFiltersButton").slideUp();
 		$("#newCookie").slideUp('fast');
@@ -478,7 +515,7 @@ function setEvents() {
 		$("#copiedToast").fadeIn(function(){
 			setTimeout(function(){
 				$("#copiedToast").fadeOut();
-			}, 800);
+			}, 2500);
 			
 		});
 		$(this).animate({ backgroundColor: "#B3FFBD" }, 300, function() {
@@ -560,11 +597,11 @@ function setCookieEvents() {
 		var domain 	= $(".domain", 	cookie).val();
 		var name 	= $(".name", 	cookie).val();
 		var value 	= $(".value", 	cookie).val();
-	
+		
 		$("#filterByDomain","#cookieFilter").text(domain);
 		$("#filterByName","#cookieFilter").text(name);
 		$("#filterByValue","#cookieFilter").text(value);
-	
+		
 		$("#addCookieButton").fadeOut('fast',function(){
 			$("#backToList").fadeIn('fast');
 		});
@@ -598,7 +635,7 @@ function setCookieEvents() {
 	$('.expiration').scroller({
 		preset: 'datetime',
 		minDate: new Date(now.getFullYear(), now.getMonth(), now.getDate()),
-		maxDate: new Date(2030, now.getMonth(), now.getDate()),
+		maxDate: new Date(2050, now.getMonth(), now.getDate()),
 		dateFormat: "dd/mm/yy",
 		timeFormat: "hh:ii A",
 		theme: 'android-ics light',
@@ -622,7 +659,6 @@ function setCookieEvents() {
 		return false;
 	});
 	
-	
 	$(".domain",$("#newCookie")).val(getHost(url));
 }
 
@@ -636,9 +672,9 @@ function startAlertDialog(title, ok_callback, cancel_callback) {
 			$("#alert_wrapper").hide();
 			ok_callback();
 		});
-	}
-	else
+	} else {
 		return;
+	}
 	
 	if(cancel_callback != undefined) {
 		$("#alert_cancel").show();
